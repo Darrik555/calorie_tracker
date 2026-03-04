@@ -4,84 +4,92 @@ import {
   Text, 
   TextInput, 
   TouchableOpacity, 
-  Alert, 
   ActivityIndicator 
 } from 'react-native';
-// Adjust the import path if your file structure differs slightly
+import { router } from 'expo-router';
 import { supabase } from '../src/services/supabase'; 
 
 export default function AuthScreen() {
-  // Local state management for form inputs and loading indicator
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  // Authenticate existing user
   async function signInWithEmail() {
     setLoading(true);
+    setErrorMessage('');
+    
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      Alert.alert('Sign In Failed', error.message);
+      setErrorMessage(error.message);
+      setLoading(false);
     } else {
-      Alert.alert('Success', 'You are successfully logged in!');
+      router.replace('/(tabs)/dashboard');
     }
-    setLoading(false);
   }
 
-  // Register a new user
   async function signUpWithEmail() {
     setLoading(true);
+    setErrorMessage('');
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
     });
 
     if (error) {
-      Alert.alert('Sign Up Failed', error.message);
+      setErrorMessage(error.message);
+      setLoading(false);
     } else {
-      Alert.alert('Success', 'Account created! Please check your email.');
+      router.replace('/(tabs)/dashboard');
     }
-    setLoading(false);
   }
 
   return (
-    // Main container with NativeWind classes for centering and background
-    <View className="flex-1 justify-center px-6 bg-white">
+    <View className="flex-1 justify-center px-6 bg-white dark:bg-gray-900">
       <View className="items-center mb-10">
-        <Text className="text-4xl font-bold text-gray-800 tracking-tight">
+        <Text className="text-4xl font-bold text-gray-800 dark:text-white tracking-tight">
           CalorieTracker
         </Text>
-        <Text className="text-gray-500 mt-2 text-base">
+        <Text className="text-gray-500 dark:text-gray-400 mt-2 text-base">
           Log in to manage your nutrition
         </Text>
       </View>
 
-      {/* Email Input */}
+      {/* Display error message if it exists */}
+      {errorMessage ? (
+        <View className="bg-red-100 border border-red-400 rounded-lg p-3 mb-4">
+          <Text className="text-red-700 text-sm">{errorMessage}</Text>
+        </View>
+      ) : null}
+
+      {/* ... rest of your inputs (Email & Password) ... */}
       <View className="mb-4">
-        <Text className="text-gray-700 font-medium mb-2">Email</Text>
+        <Text className="text-gray-700 dark:text-gray-300 font-medium mb-2">Email</Text>
         <TextInput
-          className="border border-gray-300 rounded-lg p-4 text-gray-800 bg-gray-50"
+          className="border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-gray-800 dark:text-white bg-gray-50 dark:bg-gray-800"
           onChangeText={setEmail}
           value={email}
           placeholder="email@address.com"
+          placeholderTextColor="#9ca3af"
           autoCapitalize="none"
           keyboardType="email-address"
         />
       </View>
 
-      {/* Password Input */}
       <View className="mb-8">
-        <Text className="text-gray-700 font-medium mb-2">Password</Text>
+        <Text className="text-gray-700 dark:text-gray-300 font-medium mb-2">Password</Text>
         <TextInput
-          className="border border-gray-300 rounded-lg p-4 text-gray-800 bg-gray-50"
+          className="border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-gray-800 dark:text-white bg-gray-50 dark:bg-gray-800"
           onChangeText={setPassword}
           value={password}
           secureTextEntry={true}
           placeholder="********"
+          placeholderTextColor="#9ca3af"
           autoCapitalize="none"
         />
       </View>
@@ -94,7 +102,6 @@ export default function AuthScreen() {
           <TouchableOpacity 
             className="bg-green-400 rounded-lg py-4 items-center"
             onPress={signInWithEmail}
-            disabled={loading}
           >
             <Text className="text-white font-bold text-lg">Sign In</Text>
           </TouchableOpacity>
@@ -102,7 +109,6 @@ export default function AuthScreen() {
           <TouchableOpacity 
             className="border border-green-400 rounded-lg py-4 items-center bg-transparent"
             onPress={signUpWithEmail}
-            disabled={loading}
           >
             <Text className="text-green-500 font-bold text-lg">Create Account</Text>
           </TouchableOpacity>
