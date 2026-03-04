@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import 'react-native-reanimated';
@@ -15,7 +15,7 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
-  const segments = useSegments();
+  const pathname = usePathname();
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -36,32 +36,43 @@ export default function RootLayout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
     if (!isInitialized) return;
 
-    // Check if the user is currently trying to access a protected route (inside the tabs group)
-    const inAuthGroup = segments[0] === '(tabs)';
+    const isLoginScreen = pathname === '/';
 
-    if (session && !inAuthGroup) {
+    if (session && isLoginScreen) {
       router.replace('/(tabs)/dashboard');
-    } else if (!session && inAuthGroup) {
+    } else if (!session && !isLoginScreen) {
       router.replace('/');
     }
 
-    // Hide the splash screen once we have determined where to navigate
     SplashScreen.hideAsync();
-  }, [session, isInitialized, segments]);
+    
+  }, [session, isInitialized, pathname]);
 
   // Render nothing until we are initialized to prevent UI flickering
   if (!isInitialized) {
     return null;
   }
 
-  return (
+return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
+        {/* Login Screen */}
         <Stack.Screen name="index" options={{ headerShown: false }} />
+        
+        {/* Tab Navigator */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        
+        {/* Entry Screen */}
+        <Stack.Screen 
+          name="add-entry" 
+          options={{ 
+            headerShown: false,
+            presentation: 'modal'
+          }} 
+        />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
