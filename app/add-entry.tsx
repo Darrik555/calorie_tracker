@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+// app/add-entry.tsx
+import React, { useEffect, useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -11,7 +12,7 @@ import {
   Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { fetchProductByBarcode, searchProductsByText, FetchedFood } from '../src/services/openFoodFacts';
@@ -31,7 +32,7 @@ interface FoodItem {
 
 export default function AddEntryScreen() {
   const { meal } = useLocalSearchParams<{ meal: string }>();
-  const displayMeal = meal || 'Meal';
+  const displayMeal = meal || 'Breakfast'; // Provide a valid default for DB type casting
 
   // Local state for UI toggles and inputs
   const [activeTab, setActiveTab] = useState<'foods' | 'recipes'>('foods');
@@ -49,13 +50,13 @@ export default function AddEntryScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
 
+  // Recent Food
   const [recentFoods, setRecentFoods] = useState<FoodItem[]>([]);
   const [isLoadingRecent, setIsLoadingRecent] = useState(true);
 
-  const userRecipes: FoodItem[] = [
-    { id: 'r1', name: 'Avocado Toast', amount: '1 portion', calories: 320, carbs: 30, protein: 10, fat: 15 },
-    { id: 'r2', name: 'Protein Shake', amount: '1 portion', calories: 240, carbs: 10, protein: 30, fat: 5 },
-  ];
+  // Recipes
+  const [userRecipes, setUserRecipes] = useState<any[]>([]);
+  const [isLoadingRecipes, setIsLoadingRecipes] = useState(false);
 
   useEffect(() => {
     // Only search if user typed at least 3 characters
@@ -149,7 +150,72 @@ export default function AddEntryScreen() {
     fetchRecentFoods();
   }, []);
 
-  const handleAddItem = (item: FoodItem) => {
+  useFocusEffect(
+    useCallback(() => {
+      async function fetchUserRecipes() {
+        setIsLoadingRecipes(true);
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+
+          // Fetch recipes AND their ingredients AND the macros of those ingredients
+          const { data, error } = await supabase
+            .from('recipes')
+            .select(`
+              id,
+              title,
+              recipe_ingredients (
+                amount_in_grams,
+                foods (
+                  calories_per_100g
+                )
+              )
+            `)
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+
+          if (data) {
+            const formattedRecipes = data.map((recipe: any) => {
+              // Calculate total calories for this recipe
+              let totalCalories = 0;
+              if (recipe.recipe_ingredients) {
+                recipe.recipe_ingredients.forEach((ing: any) => {
+                  const food = Array.isArray(ing.foods) ? ing.foods[0] : ing.foods;
+                  if (food) {
+                    totalCalories += (food.calories_per_100g / 100) * ing.amount_in_grams;
+                  }
+                });
+              }
+
+              return {
+                id: recipe.id,
+                name: recipe.title,
+                amount: '1 portion',
+                numericAmount: 1, // Default to 1 portion
+                unit: 'portion',
+                calories: Math.round(totalCalories),
+                isRecipe: true // Flag for our database saving logic
+              };
+            });
+            setUserRecipes(formattedRecipes);
+          }
+        } catch (error) {
+          console.error('Error fetching recipes:', error);
+        } finally {
+          setIsLoadingRecipes(false);
+        }
+      }
+
+      fetchUserRecipes();
+      
+      // Optional: You can also move your fetchRecentFoods() call in here 
+      // so the history refreshes too!
+    }, [])
+  );
+
+  const handleAddItem = (item: any) => {
     addStagedItem({
       id: item.id,
       name: item.name,
@@ -158,7 +224,8 @@ export default function AddEntryScreen() {
       calories: item.calories,
       carbs: item.carbs,
       protein: item.protein,
-      fat: item.fat
+      fat: item.fat,
+      isRecipe: item.isRecipe || false,
     });
   };
 
@@ -171,11 +238,28 @@ export default function AddEntryScreen() {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) throw new Error('User not logged in');
 
-      // Helper to cast the meal string to the specific union type required by Supabase
-      const dbMealType = displayMeal.toLowerCase() as 'breakfast' | 'lunch' | 'dinner' | 'snacks';
+      // Helper to safely cast the meal string to the specific union type required by Supabase
+      // If displayMeal is somehow not one of the 4, we default to 'snacks' to prevent DB errors.
+      const rawMeal = displayMeal.toLowerCase();
+      const validMeals = ['breakfast', 'lunch', 'dinner', 'snacks'];
+      const dbMealType = validMeals.includes(rawMeal) ? rawMeal as 'breakfast' | 'lunch' | 'dinner' | 'snacks' : 'snacks';
 
       // 2. Map through all staged items and save them
       for (const item of addedItems) {
+        
+        if (item.isRecipe) {
+          const { error: trackingError } = await supabase
+            .from('tracking_entries')
+            .insert({
+              user_id: user.id,
+              meal_type: dbMealType, // Use the safely casted variable here!
+              recipe_id: item.id, 
+              amount_in_grams: item.amount, 
+              consumed_date: new Date().toISOString().split('T')[0]
+            });
+          if (trackingError) throw trackingError;
+          continue; 
+        }
         
         let localFoodId = null;
 
@@ -201,9 +285,9 @@ export default function AddEntryScreen() {
               barcode: item.id,
               name: item.name,
               calories_per_100g: item.calories,
-              protein_per_100g: item.protein, 
-              carbs_per_100g: item.carbs,
-              fat_per_100g: item.fat,
+              protein_per_100g: item.protein || 0, // Fallback to 0 if undefined
+              carbs_per_100g: item.carbs || 0,
+              fat_per_100g: item.fat || 0,
               is_custom: false,
               created_by: user.id
             })
@@ -219,10 +303,10 @@ export default function AddEntryScreen() {
           .from('tracking_entries')
           .insert({
             user_id: user.id,
-            meal_type: dbMealType,
+            meal_type: dbMealType, // Use the safely casted variable here!
             food_id: localFoodId,
-            amount_in_grams: item.amount, // TODO: Convert unit to grams if it's 'serving'
-            consumed_date: new Date().toISOString().split('T')[0] // 'YYYY-MM-DD'
+            amount_in_grams: item.amount, 
+            consumed_date: new Date().toISOString().split('T')[0] 
           });
 
         if (trackingError) throw trackingError;
@@ -275,31 +359,22 @@ export default function AddEntryScreen() {
     setIsFetchingFood(false);
 
     if (product) {
-    const newFoodItem = {
-      id: product.id,
-      name: product.name,
-      amount: '100g',
-      calories: product.calories_per_100g,
-      carbs: product.carbs_per_100g,
-      protein: product.protein_per_100g,
-      fat: product.fat_per_100g
-    };
-    
-    addStagedItem({
-      id: product.id,
-      name: product.name,
-      amount: 100,
-      unit: 'g',
-      calories: product.calories_per_100g,
-      carbs: product.carbs_per_100g,
-      protein: product.protein_per_100g,
-      fat: product.fat_per_100g
-    });
-    
-    Alert.alert(
-      'Product Found!', 
-      `${product.brand} - ${product.name}\n${product.calories_per_100g} kcal per 100g`
-    );
+      // Direct store add using existing logic
+      addStagedItem({
+        id: product.id,
+        name: product.name,
+        amount: 100,
+        unit: 'g',
+        calories: product.calories_per_100g,
+        carbs: product.carbs_per_100g,
+        protein: product.protein_per_100g,
+        fat: product.fat_per_100g
+      });
+      
+      Alert.alert(
+        'Product Found!', 
+        `${product.brand} - ${product.name}\n${product.calories_per_100g} kcal per 100g`
+      );
     } else {
       Alert.alert(
         'Not Found', 
@@ -484,7 +559,9 @@ export default function AddEntryScreen() {
           <ScrollView className="flex-1 px-4 pt-4">
             
             {activeTab === 'recipes' && (
-              <TouchableOpacity className="flex-row items-center justify-center bg-green-50 dark:bg-gray-800 border border-green-200 dark:border-green-900 rounded-xl py-4 mb-6">
+              <TouchableOpacity className="flex-row items-center justify-center bg-green-50 dark:bg-gray-800 border border-green-200 dark:border-green-900 rounded-xl py-4 mb-6"
+              onPress={() => router.push({ pathname: '/create-recipe' })}
+              >
                 <Ionicons name="add-circle" size={24} color="#22c55e" className="mr-2" />
                 <Text className="text-green-600 dark:text-green-400 font-bold text-base ml-2">
                   Create New Recipe
@@ -499,6 +576,8 @@ export default function AddEntryScreen() {
             {/* List logic: Spinner -> List -> Empty Message */}
             {activeTab === 'foods' && isLoadingRecent ? (
               <ActivityIndicator size="small" color="#22c55e" className="mt-4" />
+            ) : activeTab === 'recipes' && isLoadingRecipes ? (
+              <ActivityIndicator size="small" color="#22c55e" className="mt-4" />
             ) : (
               (activeTab === 'foods' ? recentFoods : userRecipes).map((item) => (
                 <View 
@@ -507,10 +586,17 @@ export default function AddEntryScreen() {
                 >
                   <TouchableOpacity 
                     className="flex-1 pr-4" 
-                    onPress={() => router.push({ 
-                      pathname: '/food-detail', 
-                      params: { barcode: item.id, meal: displayMeal } 
-                    })}
+                    onPress={() => {
+                      if(activeTab === 'foods') {
+                        router.push({ 
+                          pathname: '/food-detail', 
+                          params: { barcode: item.id, meal: displayMeal } 
+                        })
+                      } else {
+                        // TODO: Route to recipe detail view
+                        console.log('Recipe details not built yet');
+                      }
+                    }}
                   >
                     <Text className="text-base font-bold text-gray-800 dark:text-white mb-1">
                       {item.name}
@@ -535,6 +621,12 @@ export default function AddEntryScreen() {
             {activeTab === 'foods' && !isLoadingRecent && recentFoods.length === 0 && (
               <Text className="text-center text-gray-500 dark:text-gray-400 mt-4">
                 No recent foods found. Use search to add items!
+              </Text>
+            )}
+
+            {activeTab === 'recipes' && !isLoadingRecipes && userRecipes.length === 0 && (
+              <Text className="text-center text-gray-500 dark:text-gray-400 mt-4">
+                No recipes found. Create your first one above!
               </Text>
             )}
             

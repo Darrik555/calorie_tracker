@@ -9,6 +9,7 @@ export interface StagedItem {
   carbs: number;
   protein: number;
   fat: number;
+  isRecipe?: boolean;
 }
 
 interface EntryStore {
